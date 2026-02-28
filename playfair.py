@@ -52,8 +52,12 @@ def prepare_text(text):
         if i + 1 < len(text):
             char2 = text[i+1]
             if char1 == char2:
-                prepared += char1 + 'Х'
-                i += 1
+                if char1 == 'Х':
+                    prepared += char1 + 'Ь'
+                    i += 1
+                else:
+                    prepared += char1 + 'Х'
+                    i += 1
             else:
                 prepared += char1 + char2
                 i += 2

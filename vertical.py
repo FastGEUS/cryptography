@@ -36,36 +36,6 @@ def generate_key_order(keyword):
     return order
 
 
-def get_padding_chars(num_needed):
-    """
-    Запрашивает у пользователя дополняющие символы
-    
-    num_needed - сколько символов нужно
-    """
-    print(f"\nТекст нужно дополнить до кратности количеству столбцов!")
-    print(f"Требуется добавить {num_needed} символ(ов)")
-    
-    while True:
-        padding = input(f"Введите {num_needed} букву(-ы) для заполнения: ").upper().replace('Ё', 'Е')
-        
-        # Оставляем только буквы алфавита
-        clean_padding = ''
-        for char in padding:
-            if char in ALPHABET:
-                clean_padding += char
-        
-        if len(clean_padding) == num_needed:
-            return clean_padding
-        elif len(clean_padding) < num_needed:
-            print(f"Недостаточно символов! Нужно {num_needed}, введено {len(clean_padding)}")
-        else:
-            print(f"Слишком много символов! Нужно {num_needed}, введено {len(clean_padding)}")
-            print(f"  Будут использованы первые {num_needed} символа: {clean_padding[:num_needed]}")
-            confirm = input("Продолжить? (да/нет): ")
-            if confirm.lower() in ['да', 'yes', 'y', 'д']:
-                return clean_padding[:num_needed]
-
-
 def vertical_permutation_encrypt(text, keyword):
     """
     Шифрует текст методом вертикальной перестановки
@@ -91,28 +61,26 @@ def vertical_permutation_encrypt(text, keyword):
     print(f"\nДлина текста: {len(text)} символов")
     print(f"Количество столбцов: {num_cols}")
     
-    # Проверяем, нужно ли дополнение
+    # Вычисляем количество строк (с учетом неполной последней строки)
+    num_rows = (len(text) + num_cols - 1) // num_cols  # Округление вверх
     remainder = len(text) % num_cols
+    
     if remainder != 0:
-        num_needed = num_cols - remainder
-        padding = get_padding_chars(num_needed)
-        text += padding
-        print(f"✓ Текст дополнен: '{padding}'")
-        print(f"Новая длина текста: {len(text)} символов")
-    else:
-        print("✓ Дополнение не требуется")
+        print(f"⚠ Последняя строка будет неполной: {remainder} символов из {num_cols}")
     
-    # Вычисляем количество строк
-    num_rows = len(text) // num_cols
+    print(f"Количество строк: {num_rows} (полных: {len(text) // num_cols}, неполных: {1 if remainder else 0})")
     
-    # Создаем таблицу
+    # Создаем таблицу (с пустыми ячейками для неполной строки)
     table = []
     index = 0
     for row in range(num_rows):
         table_row = []
         for col in range(num_cols):
-            table_row.append(text[index])
-            index += 1
+            if index < len(text):
+                table_row.append(text[index])
+                index += 1
+            else:
+                table_row.append('')  # Пустая ячейка
         table.append(table_row)
     
     # Выводим таблицу ДО перестановки
@@ -140,12 +108,15 @@ def vertical_permutation_encrypt(text, keyword):
     for i, row in enumerate(table):
         row_str = f"{i+1:3d} │ "
         for cell in row:
-            row_str += f"{cell:^5}"
+            if cell:
+                row_str += f"{cell:^5}"
+            else:
+                row_str += "  ·  "  # Пустая ячейка
         print(row_str)
     
     print("=" * 80)
     
-    # Читаем столбцы в порядке ключа
+    # Читаем столбцы в порядке ключа (пропускаем пустые ячейки)
     encrypted = ""
     
     print("\nПроцесс шифрования (чтение столбцов в порядке номеров):")
@@ -159,9 +130,13 @@ def vertical_permutation_encrypt(text, keyword):
     for rank, col_index in column_positions:
         column_text = ""
         for row in range(num_rows):
-            column_text += table[row][col_index]
+            if table[row][col_index]:  # Пропускаем пустые ячейки
+                column_text += table[row][col_index]
         encrypted += column_text
-        print(f"Столбец №{rank} - '{keyword[col_index]}' (позиция {col_index+1}): {column_text}")
+        if column_text:
+            print(f"Столбец №{rank} - '{keyword[col_index]}' (позиция {col_index+1}): {column_text}")
+        else:
+            print(f"Столбец №{rank} - '{keyword[col_index]}' (позиция {col_index+1}): [пусто]")
     
     print("-" * 80)
     
@@ -193,12 +168,27 @@ def vertical_permutation_decrypt(encrypted_text, keyword):
     print(f"Количество столбцов: {num_cols}")
     
     # Вычисляем количество строк
-    if len(encrypted_text) % num_cols != 0:
-        print(f"ПРЕДУПРЕЖДЕНИЕ: длина текста ({len(encrypted_text)}) не кратна количеству столбцов ({num_cols})")
-        print(f"  Возможно, текст поврежден или использован неверный ключ")
+    num_rows = (len(encrypted_text) + num_cols - 1) // num_cols  # Округление вверх
+    remainder = len(encrypted_text) % num_cols
     
-    num_rows = len(encrypted_text) // num_cols
+    if remainder != 0:
+        print(f"⚠ Последняя строка была неполной: {remainder} символов из {num_cols}")
+        print(f"  Количество пустых ячеек в последней строке: {num_cols - remainder}")
+    
     print(f"Количество строк: {num_rows}")
+    
+    # Вычисляем длины столбцов
+    # Полные столбцы имеют num_rows символов
+    # Столбцы, в которых есть пустая ячейка, имеют num_rows - 1 символов
+    
+    # Определяем, в каких столбцах есть символы в последней строке
+    if remainder == 0:
+        # Все столбцы полные
+        col_lengths = [num_rows] * num_cols
+    else:
+        # Первые remainder столбцов имеют num_rows символов
+        # Остальные - num_rows - 1
+        col_lengths = [num_rows if i < remainder else num_rows - 1 for i in range(num_cols)]
     
     # Создаем пустую таблицу
     table = [['' for _ in range(num_cols)] for _ in range(num_rows)]
@@ -220,12 +210,19 @@ def vertical_permutation_decrypt(encrypted_text, keyword):
     text_index = 0
     for rank, col_index in column_positions:
         column_text = ""
-        for row in range(num_rows):
+        # Определяем длину этого столбца
+        col_len = col_lengths[col_index]
+        
+        for row in range(col_len):
             if text_index < len(encrypted_text):
                 table[row][col_index] = encrypted_text[text_index]
                 column_text += encrypted_text[text_index]
                 text_index += 1
-        print(f"Столбец №{rank} - '{keyword[col_index]}' (позиция {col_index+1}): {column_text}")
+        
+        if column_text:
+            print(f"Столбец №{rank} - '{keyword[col_index]}' (позиция {col_index+1}): {column_text} (длина: {col_len})")
+        else:
+            print(f"Столбец №{rank} - '{keyword[col_index]}' (позиция {col_index+1}): [пусто]")
     
     print("-" * 80)
     
@@ -249,19 +246,25 @@ def vertical_permutation_decrypt(encrypted_text, keyword):
     for i, row in enumerate(table):
         row_str = f"{i+1:3d} │ "
         for cell in row:
-            row_str += f"{cell:^5}"
+            if cell:
+                row_str += f"{cell:^5}"
+            else:
+                row_str += "  ·  "  # Пустая ячейка
         print(row_str)
     
     print("=" * 80)
     
-    # Читаем таблицу построчно
+    # Читаем таблицу построчно (пропуская пустые ячейки)
     decrypted = ""
     print("\nЧтение расшифрованного текста построчно:")
     print("-" * 80)
     for i, row in enumerate(table):
-        row_text = ''.join(row)
+        row_text = ''.join(cell for cell in row if cell)  # Пропускаем пустые
         decrypted += row_text
-        print(f"Строка {i+1}: {row_text}")
+        if row_text:
+            print(f"Строка {i+1}: {row_text}")
+        else:
+            print(f"Строка {i+1}: [пусто]")
     print("-" * 80)
     
     return decrypted
@@ -279,6 +282,7 @@ print("\nПринцип работы:")
 print("1. Текст записывается в таблицу построчно")
 print("2. Столбцы нумеруются по алфавитному порядку букв ключевого слова")
 print("3. Шифртекст читается по столбцам в порядке их номеров")
+print("4. Последняя строка может быть неполной (без дополнения)")
 
 while True:
     print("\n" + "=" * 80)
@@ -302,20 +306,20 @@ while True:
         text = input("\nВведите текст для шифрования: ")
         
         if not text.strip():
-            print("Текст не может быть пустым!")
+            print("✗ Текст не может быть пустым!")
             continue
         
         # Ввод ключевого слова
         keyword = input("Введите ключевое слово: ")
         
         if not keyword.strip():
-            print("Ключевое слово не может быть пустым!")
+            print("✗ Ключевое слово не может быть пустым!")
             continue
         
         # Очищаем для проверки
         clean_keyword = clean_text(keyword)
         if len(clean_keyword) < 2:
-            print("Ключевое слово должно содержать минимум 2 буквы!")
+            print("✗ Ключевое слово должно содержать минимум 2 буквы!")
             continue
         
         # Шифруем
@@ -331,7 +335,7 @@ while True:
             print(f"Длина:                {len(encrypted)} символов")
             print(f"{'='*80}")
         else:
-            print(f"\n{encrypted}")
+            print(f"\n✗ {encrypted}")
     
     elif choice == '2':
         print("\n" + "-" * 80)
@@ -342,20 +346,20 @@ while True:
         encrypted_text = input("\nВведите зашифрованный текст: ")
         
         if not encrypted_text.strip():
-            print("Текст не может быть пустым!")
+            print("✗ Текст не может быть пустым!")
             continue
         
         # Ввод ключевого слова
         keyword = input("Введите ключевое слово: ")
         
         if not keyword.strip():
-            print("Ключевое слово не может быть пустым!")
+            print("✗ Ключевое слово не может быть пустым!")
             continue
         
         # Очищаем для проверки
         clean_keyword = clean_text(keyword)
         if len(clean_keyword) < 2:
-            print("Ключевое слово должно содержать минимум 2 буквы!")
+            print("✗ Ключевое слово должно содержать минимум 2 буквы!")
             continue
         
         # Расшифровываем
@@ -371,7 +375,7 @@ while True:
             print(f"Длина:                {len(decrypted)} символов")
             print(f"{'='*80}")
         else:
-            print(f"\n{decrypted}")
+            print(f"\n✗ {decrypted}")
     
     else:
-        print("\nНеверный выбор. Попробуйте снова.")
+        print("\n⚠ Неверный выбор. Попробуйте снова.")

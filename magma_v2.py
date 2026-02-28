@@ -285,9 +285,9 @@ print("=" * 80)
 while True:
     print("\n" + "=" * 80)
     print("Выберите действие:")
-    print("1 - Преобразование T") # - Для МАГМА print("1 - Зашифровать 64-битное число")
-    #print("2 - Расшифровать 64-битное число") - Для МАГМА
-    #print("3 - Запустить тест на примере из ГОСТ (А.2)") - Для МАГМА
+    print("1 - Зашифровать 64-битное число") # - Для МАГМА print("1 - Зашифровать 64-битное число")
+    print("2 - Расшифровать 64-битное число")
+    print("3 - Запустить тест на примере из ГОСТ (А.2)")
     print("0 - Выход")
     
     choice = input("\nВаш выбор: ")
@@ -298,37 +298,36 @@ while True:
     
     elif choice == '1':
         print("\n" + "-" * 80)
-        print("S-блок замены ГОСТ 34.12-2015")
+        print("ШИФРОВАНИЕ 64-БИТНОГО ЧИСЛА (МАГМА)")
         print("-" * 80)
         
-        # Ввод открытого текста с проверкой
+        # 1. Ввод открытого текста
         plaintext = input_hex(
-            "Введите открытый текст (8 HEX символов): ",
-            8,
+            "Введите открытый текст (16 HEX символов): ",
+            16,
             "Открытый текст"
         )
-        ''' 
-        # Ввод ключа с проверкой - Для МАГМА
+        
+        # 2. Ввод ключа (РАСКОММЕНТИРОВАНО И ИСПРАВЛЕНО)
         key = input_hex(
             "Введите ключ (64 HEX символа, 256 бит): ",
             64,
             "Ключ"
         )
         
-        # Генерируем раундовые ключи
+        # 3. Генерируем раундовые ключи
         round_keys = generate_round_keys(key)
-        '''
-        # Шифруем
+        
+        # 4. Шифруем
         plaintext_int = int(plaintext, 16)
-        ciphertext_int = t_transform(plaintext_int) # - Для МАГМА magma_encrypt(plaintext_int, round_keys) 
+        ciphertext_int = magma_encrypt(plaintext_int, round_keys)
         
         print(f"\n{'='*80}")
-        print(f"Открытый текст:      {plaintext_int:08x}") # - Для МАГМА {plaintext_int:016x}
-        #print(f"Ключ:                {key}") - Для МАГМА 
-        print(f"Зашифрованный текст: {ciphertext_int:08x}") #  - Для МАГМА {ciphertext_int:016x}
+        print(f"Открытый текст:      {plaintext_int:016x}")
+        print(f"Ключ:                {key}")
+        print(f"Зашифрованный текст: {ciphertext_int:016x}")
         print(f"{'='*80}")
         
-        ''' - Для МАГМА
     elif choice == '2':  
         print("\n" + "-" * 80)
         print("РАСШИФРОВАНИЕ 64-БИТНОГО ЧИСЛА")
@@ -362,7 +361,7 @@ while True:
         print(f"{'='*80}")
     
     elif choice == '3':
-        test_gost_example()'''
+        test_gost_example()
         
     else:
         print("\nНеверный выбор. Попробуйте снова.")
