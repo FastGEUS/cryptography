@@ -364,4 +364,5 @@ while True:
         test_gost_example()
         
     else:
+
         print("\nНеверный выбор. Попробуйте снова.")
