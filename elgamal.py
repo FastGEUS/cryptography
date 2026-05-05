@@ -1,22 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Криптосистема Эль-Гамаля (Блок H, алгоритм 22)
-═══════════════════════════════════════════════
-Алгоритм:
-  1. Выбирается простое p > Mi.
-  2. Выбираются x и g: 1 < x < p, 1 < g < p.
-  3. Вычисляется y = g^x mod p.
-     Открытые ключи: p, g, y.  Секретный ключ: x.
-  4. Рандомизаторы ki: gcd(ki, φ(p)) = gcd(ki, p-1) = 1.
-  5. Для каждой шифрвеличины Mi:
-       ai = g^ki mod p
-       bi = y^ki × Mi mod p
-     Шифртекст: последовательность пар (ai, bi).
-  6. Расшифрование:
-       Mi = bi × (ai^x)^(-1) mod p
-"""
-
 import math
 import re
 
@@ -86,6 +67,41 @@ def suggest_ki(p: int, count: int = 15) -> list:
         if len(result) >= count:
             break
     return result
+def is_primitive_root(g: int, p: int) -> bool:
+    """Проверяет, является ли g примитивным корнем по модулю p (p — простое).
+    По методичке: g — примитивный корень, т.е. порядок g равен φ(p) = p-1.
+    Метод: g^((p-1)/q) ≢ 1 (mod p) для всех простых делителей q числа (p-1).
+    """
+    phi = p - 1
+    if pow(g, phi, p) != 1:
+        return False
+    # Факторизация phi
+    factors = set()
+    n = phi
+    d = 2
+    while d * d <= n:
+        while n % d == 0:
+            factors.add(d)
+            n //= d
+        d += 1
+    if n > 1:
+        factors.add(n)
+    for q in factors:
+        if pow(g, phi // q, p) == 1:
+            return False
+    return True
+
+def suggest_primitive_roots(p: int, count: int = 10) -> list:
+    """Находит первые count примитивных корней по модулю p."""
+    result = []
+    for g in range(2, p):
+        if is_primitive_root(g, p):
+            result.append(g)
+        if len(result) >= count:
+            break
+    return result
+
+
 
 
 # ═══════════════════════════════════════════════════════════════

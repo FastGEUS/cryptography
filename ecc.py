@@ -1,338 +1,371 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-ECC — шифрование числа по методичке (абсцисса точки)
-====================================================
-Кривая: E_p(a,b): y² ≡ x³ + a x + b (mod p)
 
-Ключи Боба:
-  секретный ключ: c_B, 0 < c_B < q
-  открытый ключ:  D_B = [c_B]G
+# ============================================================================
+#                       ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================================
 
-Шифрование (Алиса):
-  1) выбирает k, 0 < k < q
-  2) R = [k]G
-     P = [k]D_B = (x_P, y_P)
-  3) e = m · x_P mod p
-  4) шифртекст: (R, e)
+# Алфавит и таблицы соответствия
+alf = ['а', 'б', 'в', 'г', 'д', 'е', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н',
+       'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ъ', 'ы', 'ь', 'э', 'ю', 'я']
 
-Расшифрование (Боб):
-  1) Q = [c_B]R = (x_Q, y_Q)
-  2) m' = e · x_Q^(-1) mod p
-"""
+char_to_num = {
+    'а': 1, 'б': 2, 'в': 3, 'г': 4, 'д': 5,
+    'е': 6, 'ж': 7, 'з': 8, 'и': 9, 'й': 10,
+    'к': 11, 'л': 12, 'м': 13, 'н': 14, 'о': 15,
+    'п': 16, 'р': 17, 'с': 18, 'т': 19, 'у': 20,
+    'ф': 21, 'х': 22, 'ц': 23, 'ч': 24, 'ш': 25,
+    'щ': 26, 'ъ': 27, 'ы': 28, 'ь': 29, 'э': 30,
+    'ю': 31, 'я': 32
+}
 
-import math
-
-INF = None  # точка бесконечности O
+num_to_char = {v: k for k, v in char_to_num.items()}
 
 
-# ────────────────────────────────────────────────────────────────
-#  МАТЕМАТИКА
-# ────────────────────────────────────────────────────────────────
-
-def extended_gcd(a, b):
-    if a == 0:
-        return b, 0, 1
-    g, x1, y1 = extended_gcd(b % a, a)
-    return g, y1 - (b // a) * x1, x1
-
-
-def mod_inverse(a, m):
-    a %= m
-    g, x, _ = extended_gcd(a, m)
-    if g != 1:
-        raise ValueError(f"НОД({a}, {m}) ≠ 1 — обратного элемента не существует")
-    return (x % m + m) % m
+def preprocess_text(text, encrypt_mode=True):
+    text = text.lower()
+    if encrypt_mode:
+        replacements = {
+            '.': 'тчк', ',': 'зпт', '-': 'трр', ':': 'двт',
+            ';': 'тсз', '!': 'вск', '?': 'врс', ' ': 'прб'
+        }
+        for symbol, replacement in replacements.items():
+            text = text.replace(symbol, replacement)
+    return text
 
 
-def is_prime(n: int) -> bool:
-    if n < 2:
-        return False
-    if n < 4:
-        return True
-    if n % 2 == 0 or n % 3 == 0:
-        return False
-    i = 5
-    while i * i <= n:
-        if n % i == 0 or n % (i + 2) == 0:
-            return False
-        i += 6
-    return True
+def postprocess_text(text):
+    text = text.lower()
+    replacements = {
+        'тчк': '.', 'зпт': ',', 'трр': '-', 'двт': ':',
+        'тсз': ';', 'вск': '!', 'врс': '?', 'прб': ' '
+    }
+    for sequence, symbol in replacements.items():
+        text = text.replace(sequence, symbol)
+    return text
 
 
-# ────────────────────────────────────────────────────────────────
-#  ЭЛЛИПТИЧЕСКАЯ КРИВАЯ
-# ────────────────────────────────────────────────────────────────
+def text_to_numbers(text):
+    numbers = []
+    for ch in text:
+        if ch in char_to_num:
+            numbers.append(char_to_num[ch])
+        else:
+            print(f"  ⚠️ Предупреждение: символ '{ch}' пропущен")
+    return numbers
 
-def on_curve(P, a, b, p) -> bool:
-    if P is INF:
-        return True
-    x, y = P
-    return (y * y - (x * x * x + a * x + b)) % p == 0
+
+def numbers_to_text(numbers):
+    text = ""
+    for num in numbers:
+        if num in num_to_char:
+            text += num_to_char[num]
+        else:
+            text += f"[{num}]"
+    return text
 
 
-def ec_add(P, Q, a, p):
-    """Сложение точек P + Q на E_p(a,b)."""
-    if P is INF:
+def mod_inverse(k, p):
+    return pow(k, p - 2, p)
+
+
+# ============================================================================
+#                     ФУНКЦИИ ДЛЯ ЭЛЛИПТИЧЕСКИХ КРИВЫХ
+# ============================================================================
+
+def add_points(P, Q, a, p):
+    if P is None:
         return Q
-    if Q is INF:
+    if Q is None:
         return P
-
     x1, y1 = P
     x2, y2 = Q
-
-    if x1 == x2:
-        if (y1 + y2) % p == 0:
-            return INF  # P + (-P) = O
-        # удвоение: P == Q
-        num = (3 * x1 * x1 + a) % p
-        den = (2 * y1) % p
-        lam = num * mod_inverse(den, p) % p
+    if x1 == x2 and (y1 + y2) % p == 0:
+        return None
+    if x1 == x2 and y1 == y2:
+        numerator = (3 * x1 * x1 + a) % p
+        denominator = (2 * y1) % p
     else:
-        num = (y2 - y1) % p
-        den = (x2 - x1) % p
-        lam = num * mod_inverse(den, p) % p
-
+        numerator = (y2 - y1) % p
+        denominator = (x2 - x1) % p
+    lam = (numerator * mod_inverse(denominator, p)) % p
     x3 = (lam * lam - x1 - x2) % p
     y3 = (lam * (x1 - x3) - y1) % p
     return (x3, y3)
 
 
-def ec_mul(k: int, P, a: int, p: int, verbose: bool = False):
-    """Скалярное умножение [k]P методом double-and-add (MSB first)."""
-    if k == 0 or P is INF:
-        return INF
-
-    result = INF
-    bits = bin(k)[2:]
-
-    if verbose:
-        print(f"\n    k = {k} → двоичное: {bits}")
-        print(f"    {'шаг':>4} {'бит':>4} {'после удвоения':>24} {'после сложения':>24}")
-        print("    " + "─" * 64)
-
-    for i, bit in enumerate(bits):
-        doubled = ec_add(result, result, a, p) if result is not INF else INF
-        new_res = ec_add(doubled, P, a, p) if bit == '1' else doubled
-
-        if verbose:
-            dbl = 'O' if doubled is INF else str(doubled)
-            res = 'O' if new_res is INF else str(new_res)
-            print(f"    {i+1:>4} {bit:>4} {dbl:>24} {res:>24}")
-
-        result = new_res
-
+def multiply_point(k, P, a, p):
+    if P is None or k == 0:
+        return None
+    result = None
+    current = P
+    while k:
+        if k & 1:
+            result = add_points(result, current, a, p)
+        current = add_points(current, current, a, p)
+        k >>= 1
     return result
 
 
-# ────────────────────────────────────────────────────────────────
-#  ВВОД С ПРОВЕРКАМИ
-# ────────────────────────────────────────────────────────────────
-
-def input_int(prompt: str, lo=None, hi=None) -> int:
-    while True:
-        try:
-            n = int(input(prompt).strip())
-            if lo is not None and n < lo:
-                print(f"  ✗ Значение должно быть ≥ {lo}.")
-                continue
-            if hi is not None and n > hi:
-                print(f"  ✗ Значение должно быть ≤ {hi}.")
-                continue
-            return n
-        except ValueError:
-            print("  ✗ Введите целое число.")
+def find_point_order(P, a, p):
+    if P is None:
+        return 1
+    current = P
+    order = 1
+    while current is not None:
+        current = add_points(current, P, a, p)
+        order += 1
+        if order > p * 2:
+            break
+    return order
 
 
-def input_prime(prompt: str) -> int:
-    while True:
-        n = input_int(prompt, lo=2)
-        if not is_prime(n):
-            print(f"  ✗ {n} не является простым числом.")
-            continue
-        return n
+def find_all_points(a, b, p):
+    points = []
+    for x in range(p):
+        right_side = (pow(x, 3, p) + a * x + b) % p
+        for y in range(p):
+            if pow(y, 2, p) == right_side:
+                points.append((x, y))
+    return points
 
 
-def input_curve():
-    print("\n─── Параметры кривой E_p(a,b): y² ≡ x³ + ax + b (mod p) ──")
-    p = input_prime("  Простое p: ")
-    a = input_int("  a: ")
-    b = input_int("  b: ")
-    disc = (4 * a**3 + 27 * b**2) % p
-    if disc == 0:
-        print(f"  ⚠ Внимание: дискриминант 4a³+27b² ≡ 0 (mod {p}), кривая вырождена.")
+def factorize(n):
+    factors = []
+    d = 2
+    while d * d <= n:
+        while n % d == 0:
+            factors.append(d)
+            n //= d
+        d += 1
+    if n > 1:
+        factors.append(n)
+    return factors
+
+
+def find_subgroup_order(a, b, p):
+    points = find_all_points(a, b, p)
+    n = len(points) + 1
+    factors = factorize(n)
+    q = max(factors)
+    return q
+
+
+def find_points_orders(points, a, p):
+    orders = {}
+    for point in points:
+        orders[point] = find_point_order(point, a, p)
+    return orders
+
+
+def find_cryptographic_points(points, orders):
+    suitable = []
+    for point in points:
+        order = orders[point]
+        if order > 2:
+            factors = factorize(order)
+            if len(factors) == 1 and order > 1:
+                suitable.append(point)
+    return suitable
+
+
+def encrypt_ecc(message, public_key, G, a, p, k):
+    if message >= p:
+        raise ValueError(f"Число {message} должно быть меньше {p}")
+    R = multiply_point(k, G, a, p)
+    P = multiply_point(k, public_key, a, p)
+    x = P[0]
+    e = (message * x) % p
+    return R, e
+
+
+def decrypt_ecc(ciphertext, private_key, a, p):
+    R, e = ciphertext
+    Q = multiply_point(private_key, R, a, p)
+    x = Q[0]
+    x_inv = mod_inverse(x, p)
+    message = (e * x_inv) % p
+    return message
+
+
+def parse_cipher_input_for_text_mode(input_str):
+    input_str = input_str.strip()
+    if ' ' in input_str:
+        parts = input_str.split()
+        numbers = []
+        for part in parts:
+            try:
+                numbers.append(int(part))
+            except ValueError:
+                print(f"   Ошибка: неверное число '{part}'")
+                return None
+        return numbers
     else:
-        print(f"  Дискриминант 4a³+27b² mod {p} = {disc} (≠ 0) — кривая допустима.")
-    return p, a, b
+        numbers = []
+        for i in range(0, len(input_str), 2):
+            if i + 2 <= len(input_str):
+                try:
+                    numbers.append(int(input_str[i:i+2]))
+                except ValueError:
+                    print(f"   Ошибка: неверное число '{input_str[i:i+2]}'")
+                    return None
+        return numbers
 
 
-def input_point(prompt: str, a: int, b: int, p: int):
-    while True:
-        raw = input(prompt).strip()
-        try:
-            txt = raw.replace("(", "").replace(")", "")
-            xs, ys = txt.split(",")
-            x = int(xs.strip())
-            y = int(ys.strip())
-        except Exception:
-            print("  ✗ Формат точки: x,y  или  (x,y)")
-            continue
-        P = (x, y)
-        if not on_curve(P, a, b, p):
-            lhs = (y * y) % p
-            rhs = (x * x * x + a * x + b) % p
-            print(f"  ✗ Точка {P} не на кривой: y²={lhs} ≠ x³+ax+b={rhs} (mod {p}).")
-            continue
-        return P
-
-
-def print_header(title: str):
-    print("\n" + "═" * 70)
-    print(title.center(70))
-    print("═" * 70)
-
-
-# ────────────────────────────────────────────────────────────────
-#  РЕЖИМ ШИФРОВАНИЯ (АЛИСА)
-# ────────────────────────────────────────────────────────────────
-
-def encrypt_mode():
-    print_header("РЕЖИМ ШИФРОВАНИЯ (ECC, число m)")
-
-    # 1. Кривая
-    p, a, b = input_curve()
-
-    # 2. Генератор и порядок
-    print("\n─── Точка-генератор G и её порядок q ───────────────────")
-    G = input_point("  G (x,y): ", a, b, p)
-    q = input_int("  Порядок q точки G (простое число): ", lo=2)
-
-    # 3. Ключи Боба
-    print("\n─── Ключи Боба ─────────────────────────────────────────")
-    c_B = input_int(f"  Секретный ключ c_B (0 < c_B < q={q}): ", lo=1, hi=q-1)
-    print(f"\n  Вычисляем D_B = [c_B]G = [{c_B}]{G}:")
-    D_B = ec_mul(c_B, G, a, p, verbose=True)
-    if D_B is INF:
-        print("  ✗ D_B = O. Выберите другой c_B.")
-        return
-    print(f"\n  Открытый ключ Боба: D_B = {D_B}")
-
-    # 4. Число m
-    print("\n─── Сообщение ───────────────────────────────────────────")
-    m = input_int(f"  Число m (0 < m < p={p}): ", lo=1, hi=p-1)
-
-    # 5. Параметр k
-    print("\n─── Параметр Алисы k ───────────────────────────────────")
-    k = input_int(f"  k (0 < k < q={q}): ", lo=1, hi=q-1)
-
-    # 6. R = [k]G
-    print(f"\n  Вычисление R = [k]G = [{k}]{G}:")
-    R = ec_mul(k, G, a, p, verbose=True)
-    if R is INF:
-        print("  ✗ R = O. Выберите другое k.")
-        return
-
-    # 7. P = [k]D_B
-    print(f"\n  Вычисление P = [k]D_B = [{k}]{D_B}:")
-    P = ec_mul(k, D_B, a, p, verbose=True)
-    if P is INF:
-        print("  ✗ P = O. Выберите другое k.")
-        return
-
-    x_P, y_P = P
-    print(f"\n  R = {R}")
-    print(f"  P = {P}")
-    print(f"  x_P = {x_P}")
-
-    if x_P == 0:
-        print("  ✗ x_P = 0 — деление по модулю p невозможно. Выберите другое k.")
-        return
-
-    # 8. Шифрование e = m · x_P mod p
-    e = (m * x_P) % p
-
-    print_header("РЕЗУЛЬТАТ ШИФРОВАНИЯ")
-    print(f"  m   = {m}")
-    print(f"  x_P = {x_P}")
-    print(f"  e   = m · x_P mod p = {m} · {x_P} mod {p} = {e}")
-    print(f"\n  Шифртекст:  (R, e) = ({R}, {e})")
-
-    print("\n─── Данные для проверки ────────────────────────────────")
-    print(f"  p={p}, a={a}, b={b}")
-    print(f"  G={G}, q={q}")
-    print(f"  c_B={c_B}")
-    print(f"  R={R}")
-    print(f"  e={e}")
-
-
-# ────────────────────────────────────────────────────────────────
-#  РЕЖИМ РАСШИФРОВАНИЯ (БОБ)
-# ────────────────────────────────────────────────────────────────
-
-def decrypt_mode():
-    print_header("РЕЖИМ РАСШИФРОВАНИЯ (ECC, число m)")
-
-    # 1. Кривая
-    p, a, b = input_curve()
-
-    # 2. Секретный ключ Боба
-    c_B = input_int("\n  Секретный ключ c_B: ", lo=1)
-
-    # 3. Точка R и число e
-    print("\n─── Шифртекст (R, e) ───────────────────────────────────")
-    R = input_point("  R (x,y): ", a, b, p)
-    e = input_int("  e: ", lo=0, hi=p-1)
-
-    # 4. Q = [c_B]R
-    print(f"\n  Вычисление Q = [c_B]R = [{c_B}]{R}:")
-    Q = ec_mul(c_B, R, a, p, verbose=True)
-    if Q is INF:
-        print("  ✗ Q = O. Расшифровка невозможна.")
-        return
-
-    x_Q, y_Q = Q
-    print(f"\n  Q = {Q}")
-    print(f"  x_Q = {x_Q}")
-
-    if x_Q == 0:
-        print("  ✗ x_Q = 0 — нельзя найти обратный элемент. Шифртекст некорректен.")
-        return
-
-    x_inv = mod_inverse(x_Q, p)
-    m = (e * x_inv) % p
-
-    print_header("РЕЗУЛЬТАТ РАСШИФРОВАНИЯ")
-    print(f"  x_Q^(-1) mod {p} = {x_inv}")
-    print(f"  m' = e · x_Q^(-1) mod p = {e} · {x_inv} mod {p} = {m}\n")
-
-
-# ────────────────────────────────────────────────────────────────
-#  ГЛАВНОЕ МЕНЮ
-# ────────────────────────────────────────────────────────────────
+# ============================================================================
+#                           ГЛАВНАЯ ПРОГРАММА
+# ============================================================================
 
 def main():
-    print("═" * 70)
-    print("  ECC — шифрование числа m по абсциссе точки (алг. 23)  ".center(70))
-    print("═" * 70)
-    print("  Алгоритм строго по методичке:")
-    print("    R = [k]G,  P = [k]D_B = (x,y),  e = m·x mod p")
-    print("    Q = [c_B]R = (x,y),  m' = e·x^(-1) mod p")
+    print("\n" + "=" * 80)
+    print("          КРИПТОСИСТЕМА НА ЭЛЛИПТИЧЕСКИХ КРИВЫХ (ECC)          ")
+    print("               Шифрование по схеме Эль-Гамаля на кривой          ")
+    print("=" * 80)
 
     while True:
-        print("\n" + "─" * 70)
-        print("  1 — Зашифровать число m")
-        print("  2 — Расшифровать (R, e)")
-        print("  0 — Выход")
-        choice = input("\n  Выбор: ").strip()
-        if choice == "1":
-            encrypt_mode()
-        elif choice == "2":
-            decrypt_mode()
-        elif choice == "0":
-            print("  Выход.")
+        print("\n" + "=" * 40 + " МЕНЮ " + "=" * 40)
+        print("1  Зашифровать текст/число")
+        print("2  Расшифровать текст/число")
+        print("0️  Выход")
+        print("=" * 86)
+
+        action_choice = input(" Ваш выбор: ").strip()
+
+        if action_choice == '0':
+            print("\n До свидания!")
             break
-        else:
-            print("  ✗ Неверный пункт меню.")
+        if action_choice not in ('1', '2'):
+            print(" Неверный выбор. Введите 0, 1 или 2.")
+            continue
+
+        encrypt_mode = (action_choice == '1')
+
+        # Выбор режима ввода/вывода
+        print("\nВыберите режим ввода/вывода:")
+        print("1️  Текст (русские буквы, знаки заменяются)")
+        print("2️  Параметры (целые числа)")
+        mode_choice = input(" Ваш выбор (1-2): ").strip()
+        text_input_mode = (mode_choice == '1')
+        if mode_choice not in ('1', '2'):
+            print(" Неверный выбор.")
+            continue
+
+        try:
+            # Ввод параметров кривой
+            print("\n--- Параметры эллиптической кривой ---")
+            a = int(input("  a: "))
+            b = int(input("  b: "))
+            p = int(input("  p (простое число): "))
+
+            # Находим подходящую подгруппу
+            all_points = find_all_points(a, b, p)
+            orders = find_points_orders(all_points, a, p)
+            crypto_points = find_cryptographic_points(all_points, orders)
+            q = find_subgroup_order(a, b, p)
+            print(f"\n  ! Порядок подгруппы q = {q}")
+
+            if encrypt_mode:
+                # Ввод базовой точки G
+                Gx, Gy = map(int, input("\nВведите базовую точку G (x y): ").split())
+                G = (Gx, Gy)
+                c_B = int(input(f"Введите секретный ключ получателя c_B (1..{q-1}): "))
+                if c_B < 1 or c_B >= q:
+                    print(f" Ошибка: c_B должно быть в диапазоне 1..{q-1}")
+                    continue
+                public_key = multiply_point(c_B, G, a, p)
+                print(f"\n Открытый ключ D_B = {public_key}")
+
+                if text_input_mode:
+                    # Шифрование текста
+                    text = input("\n Введите текст для шифрования: ")
+                    processed = preprocess_text(text, encrypt_mode=True)
+                    numbers = text_to_numbers(processed)
+                    if not numbers:
+                        print(" Нет допустимых символов.")
+                        continue
+
+                    import random
+                    cipher_blocks = []
+                    print("\n  Генерация случайных чисел k для каждого символа:")
+                    for i, num in enumerate(numbers):
+                        k = random.randint(1, q - 1)
+                        print(f"    Символ '{text[i]}' (число {num}): k = {k}")
+                        R, e = encrypt_ecc(num, public_key, G, a, p, k)
+                        cipher_blocks.append(((R[0], R[1]), e))
+
+                    # Формируем результат
+                    all_numbers = []
+                    for (Rx, Ry), e in cipher_blocks:
+                        all_numbers.extend([Rx, Ry, e])
+
+                    print("\n" + "=" * 80)
+                    print(" РЕЗУЛЬТАТ ШИФРОВАНИЯ")
+                    print("=" * 80)
+                    for i, ((Rx, Ry), e) in enumerate(cipher_blocks):
+                        print(f"  Блок {i+1}: R=({Rx}, {Ry}), e={e}")
+                    numbers_string = ''.join(f"{num:02d}" for num in all_numbers)
+                    numbers_grouped = ' '.join(numbers_string[i:i+5] for i in range(0, len(numbers_string), 5))
+                    print(f"\n Шифротекст (скопируйте строку):\n  {numbers_grouped}")
+
+                else:
+                    # Шифрование одного числа
+                    m = int(input("\nЧисло m для шифрования (< p): "))
+                    k = int(input(f"Введите k (1..{q-1}): "))
+                    R, e = encrypt_ecc(m, public_key, G, a, p, k)
+                    print("\n" + "=" * 80)
+                    print(" РЕЗУЛЬТАТ ШИФРОВАНИЯ")
+                    print("=" * 80)
+                    print(f"  R = ({R[0]}, {R[1]})")
+                    print(f"  e = {e}")
+
+            else:
+                # Расшифрование
+                c_B = int(input(f"\nВведите секретный ключ c_B (1..{q-1}): "))
+                if c_B < 1 or c_B >= q:
+                    print(f" Ошибка: c_B должно быть в диапазоне 1..{q-1}")
+                    continue
+
+                if text_input_mode:
+                    # Расшифрование текста из строки
+                    cipher_str = input("Введите шифротекст (строка вида '10 6 9' или '100609'): ").strip()
+                    all_numbers = parse_cipher_input_for_text_mode(cipher_str)
+                    if all_numbers is None or len(all_numbers) % 3 != 0:
+                        print(" Ошибка: неверный формат (ожидается кратное 3 числам).")
+                        continue
+                    cipher_blocks = []
+                    for i in range(0, len(all_numbers), 3):
+                        Rx, Ry, e = all_numbers[i], all_numbers[i+1], all_numbers[i+2]
+                        cipher_blocks.append(((Rx, Ry), e))
+
+                    print(f"\n  Получено {len(cipher_blocks)} блоков.")
+                    decrypted_numbers = []
+                    for (R, e) in cipher_blocks:
+                        m = decrypt_ecc((R, e), c_B, a, p)
+                        decrypted_numbers.append(m)
+
+                    decrypted_text = numbers_to_text(decrypted_numbers)
+                    result = postprocess_text(decrypted_text)
+                    print("\n" + "=" * 80)
+                    print(" РЕЗУЛЬТАТ РАСШИФРОВАНИЯ")
+                    print("=" * 80)
+                    print(f" Расшифрованный текст: {result}")
+
+                else:
+                    # Расшифрование одного блока
+                    Rx, Ry = map(int, input("Введите R (x y): ").split())
+                    e = int(input("Введите e: "))
+                    R = (Rx, Ry)
+                    m = decrypt_ecc((R, e), c_B, a, p)
+                    print("\n" + "=" * 80)
+                    print(" РЕЗУЛЬТАТ РАСШИФРОВАНИЯ")
+                    print("=" * 80)
+                    print(f"  Расшифрованное число m = {m}")
+
+        except Exception as e:
+            print(f"\n ОШИБКА: {e}")
+
+        print("=" * 50)
+        input("\nНажмите Enter для продолжения...")
 
 
 if __name__ == "__main__":

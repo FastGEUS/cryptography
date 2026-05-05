@@ -79,13 +79,12 @@ def parse_blocks(hex_input):
     """
     tokens = hex_input.strip().split()
     blocks = []
-    print(blocks)
     for tok in tokens:
         tok = tok.strip()
         if not tok:
             continue
         if len(tok) % 2:
-            tok = tok + '0'
+            tok = '0' + tok
         for i in range(0, len(tok), 16):
             chunk = tok[i:i+16].ljust(16, '0')
             blocks.append(bytes.fromhex(chunk))
@@ -162,8 +161,8 @@ def main():
 
     DEF_KEY  = "ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
     DEF_IV   = "12345678"
-    DEF_TEXT = ("92def06b3c130a59db54c704f8189d204a98fb2e67a8024c8912409b17b57e41")
-    #DEF_TEXT = ("4E98110C97B7B93C3E250D93D6E85D69136D868807B2DBEF568EB680AB52A12")
+    DEF_TEXT = ("92def06b3c130a59 db54c704f8189d20 "
+                "4a98fb2e67a8024c 8912409b17b57e41")
 
     while True:
         print("\n" + "=" * 80)
@@ -213,7 +212,7 @@ def main():
                     print("  ✗ Неверный HEX-формат")
 
             # Данные
-            data_in = input("Текст (HEX-блоки через пробел, Enter = пример):2").strip()
+            data_in = input("Текст (HEX-блоки через пробел, Enter = пример): ").strip()
             if not data_in:
                 data_in = DEF_TEXT
                 print(f"  Используется: {data_in}")
