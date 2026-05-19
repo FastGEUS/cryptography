@@ -1,4 +1,7 @@
-# Таблицы замен (S-блоки) для алгоритма МАГМА согласно ГОСТ Р 34.12-2015
+# -*- coding: utf-8 -*-
+
+from typing import Dict, Any, List
+
 PI = [
     [12, 4, 6, 2, 10, 5, 11, 9, 14, 8, 13, 7, 0, 3, 15, 1],
     [6, 8, 2, 3, 9, 10, 5, 12, 1, 14, 4, 7, 11, 13, 0, 15],
@@ -11,8 +14,7 @@ PI = [
 ]
 
 
-def is_valid_hex(text, expected_length):
-    """Проверяет, является ли строка валидной HEX строкой нужной длины"""
+def is_valid_hex(text: str, expected_length: int) -> bool:
     if len(text) != expected_length:
         return False
     try:
@@ -22,38 +24,19 @@ def is_valid_hex(text, expected_length):
         return False
 
 
-def input_hex(prompt, expected_length, description):
-    """
-    Запрашивает HEX строку с немедленной проверкой
-    
-    prompt - текст приглашения
-    expected_length - ожидаемая длина в символах
-    description - описание для сообщений об ошибке
-    """
-    while True:
-        value = input(prompt).strip().lower()
-        
-        # Проверка длины
-        if len(value) != expected_length:
-            print(f"Ошибка: {description} должен быть {expected_length} HEX символов!")
-            print(f"  Вы ввели {len(value)} символов. Попробуйте снова.")
-            continue
-        
-        # Проверка на валидность HEX
-        try:
-            int(value, 16)
-            return value
-        except ValueError:
-            print(f"Ошибка: {description} должен содержать только HEX символы (0-9, a-f)!")
-            print(f"  Недопустимые символы в строке: '{value}'")
-            continue
+def normalize_hex(text: str, expected_length: int, field_name: str) -> str:
+    text = text.strip().lower()
+    if text.startswith("0x"):
+        text = text[2:]
+
+    if not is_valid_hex(text, expected_length):
+        raise ValueError(
+            f"{field_name} должен быть HEX-строкой длиной {expected_length} символов."
+        )
+    return text
 
 
-def t_transform(a):
-    """
-    Преобразование t: V32 → V32
-    Применяет таблицы замен (S-блоки) согласно формуле (14)
-    """
+def t_transform(a: int) -> int:
     result = 0
     for i in range(8):
         nibble = (a >> (4 * i)) & 0x0F
@@ -62,307 +45,372 @@ def t_transform(a):
     return result
 
 
-def rotate_left_11(value):
-    """Циклический сдвиг влево на 11 бит для 32-битного числа"""
+def rotate_left_11(value: int) -> int:
     value &= 0xFFFFFFFF
     return ((value << 11) | (value >> 21)) & 0xFFFFFFFF
 
 
-def g_transform(k, a):
-    """
-    Преобразование g[k]: V32 → V32 согласно формуле (15)
-    g[k](a) = (t(Vec32(Int32(a) ⊞ Int32(k)))) ⋘11
-    """
-    temp = (a + k) & 0xFFFFFFFF
-    temp = t_transform(temp)
-    temp = rotate_left_11(temp)
-    return temp
+def g_transform_details(k: int, a: int) -> Dict[str, int]:
+    added = (a + k) & 0xFFFFFFFF
+    t_value = t_transform(added)
+    rotated = rotate_left_11(t_value)
+
+    return {
+        "input_a": a & 0xFFFFFFFF,
+        "round_key": k & 0xFFFFFFFF,
+        "after_add_mod32": added,
+        "after_t": t_value,
+        "after_rot11": rotated
+    }
 
 
-def G_transform(k, a1, a0):
-    """
-    Преобразование G[k]: V32 × V32 → V32 × V32 согласно формуле (16)
-    G[k](a1, a0) = (a0, g[k](a0) ⊕ a1)
-    """
+def g_transform(k: int, a: int) -> int:
+    return g_transform_details(k, a)["after_rot11"]
+
+
+def G_transform(k: int, a1: int, a0: int):
     new_a1 = a0
     new_a0 = g_transform(k, a0) ^ a1
     return new_a1, new_a0
 
 
-def G_star_transform(k, a1, a0):
-    """
-    Преобразование G*[k]: V32 × V32 → V64 согласно формуле (17)
-    G*[k](a1, a0) = (g[k](a0) ⊕ a1)||a0
-    """
+def G_star_transform(k: int, a1: int, a0: int):
     result_high = g_transform(k, a0) ^ a1
     result_low = a0
     return result_high, result_low
 
 
-def generate_round_keys(key_hex):
-    """
-    Генерирует 32 итерационных ключа из 256-битного ключа (HEX)
-    согласно формуле (18) ГОСТ Р 34.12-2015
-    """
+def generate_round_keys(key_hex: str) -> List[int]:
+    key_hex = normalize_hex(key_hex, 64, "Ключ")
     key_bytes = bytes.fromhex(key_hex)
-    
-    if len(key_bytes) != 32:
-        raise ValueError("Ключ должен быть длиной 64 символа HEX (256 бит)")
-    
-    # Разбиваем ключ на 8 подключей по 32 бита
+
     K = []
     for i in range(8):
-        k_bytes = key_bytes[i*4:(i+1)*4]
+        k_bytes = key_bytes[i * 4:(i + 1) * 4]
         K.append(int.from_bytes(k_bytes, byteorder='big'))
-    
-    # Формируем 32 итерационных ключа согласно формуле (18)
+
     round_keys = []
-    
-    # K1...K8
-    for i in range(8):
-        round_keys.append(K[i])
-    
-    # K9...K16 = K1...K8
-    for i in range(8):
-        round_keys.append(K[i])
-    
-    # K17...K24 = K1...K8
-    for i in range(8):
-        round_keys.append(K[i])
-    
-    # K25...K32 = K8...K1 (в обратном порядке)
-    for i in range(7, -1, -1):
-        round_keys.append(K[i])
-    
+    round_keys.extend(K)
+    round_keys.extend(K)
+    round_keys.extend(K)
+    round_keys.extend(K[::-1])
+
     return round_keys
 
 
-def magma_encrypt(a, round_keys):
-    """
-    Шифрует 64-битное число алгоритмом МАГМА
-    Согласно формуле (19): E = G*[K32]G[K31]...G[K2]G[K1](a1, a0)
-    """
-    if isinstance(a, str):
-        a = int(a, 16)
-    
-    # Разбиваем на две 32-битные части
-    a1 = (a >> 32) & 0xFFFFFFFF
-    a0 = a & 0xFFFFFFFF
-    
-    # 31 раунд с преобразованием G
-    for i in range(31):
-        a1, a0 = G_transform(round_keys[i], a1, a0)
-    
-    # 32-й раунд с преобразованием G*
-    b1, b0 = G_star_transform(round_keys[31], a1, a0)
-    
-    # Объединяем результат
-    b = (b1 << 32) | b0
-    
-    return b
+def magma_encrypt_block(block_hex: str, key_hex: str, return_rounds: bool = False) -> Dict[str, Any]:
+    try:
+        block_hex = normalize_hex(block_hex, 16, "Открытый текст")
+        key_hex = normalize_hex(key_hex, 64, "Ключ")
+
+        round_keys = generate_round_keys(key_hex)
+        block = int(block_hex, 16)
+
+        a1 = (block >> 32) & 0xFFFFFFFF
+        a0 = block & 0xFFFFFFFF
+
+        rounds = []
+
+        for i in range(31):
+            g_info = g_transform_details(round_keys[i], a0)
+            new_a1 = a0
+            new_a0 = g_info["after_rot11"] ^ a1
+
+            if return_rounds:
+                rounds.append({
+                    "round": i + 1,
+                    "type": "G",
+                    "key": f"{round_keys[i]:08x}",
+                    "in_a1": f"{a1:08x}",
+                    "in_a0": f"{a0:08x}",
+                    "a0_plus_k": f"{g_info['after_add_mod32']:08x}",
+                    "after_t": f"{g_info['after_t']:08x}",
+                    "after_rot11": f"{g_info['after_rot11']:08x}",
+                    "out_a1": f"{new_a1:08x}",
+                    "out_a0": f"{new_a0:08x}"
+                })
+
+            a1, a0 = new_a1, new_a0
+
+        g_info = g_transform_details(round_keys[31], a0)
+        b1 = g_info["after_rot11"] ^ a1
+        b0 = a0
+
+        if return_rounds:
+            rounds.append({
+                "round": 32,
+                "type": "G*",
+                "key": f"{round_keys[31]:08x}",
+                "in_a1": f"{a1:08x}",
+                "in_a0": f"{a0:08x}",
+                "a0_plus_k": f"{g_info['after_add_mod32']:08x}",
+                "after_t": f"{g_info['after_t']:08x}",
+                "after_rot11": f"{g_info['after_rot11']:08x}",
+                "out_a1": f"{b1:08x}",
+                "out_a0": f"{b0:08x}"
+            })
+
+        result = (b1 << 32) | b0
+
+        return {
+            "success": True,
+            "algorithm": "magma",
+            "mode": "encrypt",
+            "input_block": block_hex,
+            "key": key_hex,
+            "round_keys": [f"{k:08x}" for k in round_keys],
+            "rounds": rounds,
+            "result_block": f"{result:016x}"
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "algorithm": "magma",
+            "mode": "encrypt",
+            "error": str(e),
+            "input_block": block_hex,
+            "key": key_hex
+        }
 
 
-def magma_decrypt(b, round_keys):
-    """
-    Расшифровывает 64-битное число алгоритмом МАГМА
-    Согласно формуле (20): D = G*[K1]G[K2]...G[K31]G[K32](a1, a0)
-    """
-    if isinstance(b, str):
-        b = int(b, 16)
-    
-    # Разбиваем на две 32-битные части
-    b1 = (b >> 32) & 0xFFFFFFFF
-    b0 = b & 0xFFFFFFFF
-    
-    # 31 раунд с преобразованием G (ключи K32, K31, ..., K2)
-    for i in range(31, 0, -1):
-        b1, b0 = G_transform(round_keys[i], b1, b0)
-    
-    # 32-й раунд с преобразованием G* (ключ K1)
-    a1, a0 = G_star_transform(round_keys[0], b1, b0)
-    
-    # Объединяем результат
-    a = (a1 << 32) | a0
-    
-    return a
+def magma_decrypt_block(block_hex: str, key_hex: str, return_rounds: bool = False) -> Dict[str, Any]:
+    try:
+        block_hex = normalize_hex(block_hex, 16, "Зашифрованный текст")
+        key_hex = normalize_hex(key_hex, 64, "Ключ")
+
+        round_keys = generate_round_keys(key_hex)
+        block = int(block_hex, 16)
+
+        b1 = (block >> 32) & 0xFFFFFFFF
+        b0 = block & 0xFFFFFFFF
+
+        rounds = []
+
+        for i in range(31, 0, -1):
+            g_info = g_transform_details(round_keys[i], b0)
+            new_b1 = b0
+            new_b0 = g_info["after_rot11"] ^ b1
+
+            if return_rounds:
+                rounds.append({
+                    "round": 32 - i,
+                    "type": "G",
+                    "key": f"{round_keys[i]:08x}",
+                    "in_a1": f"{b1:08x}",
+                    "in_a0": f"{b0:08x}",
+                    "a0_plus_k": f"{g_info['after_add_mod32']:08x}",
+                    "after_t": f"{g_info['after_t']:08x}",
+                    "after_rot11": f"{g_info['after_rot11']:08x}",
+                    "out_a1": f"{new_b1:08x}",
+                    "out_a0": f"{new_b0:08x}"
+                })
+
+            b1, b0 = new_b1, new_b0
+
+        g_info = g_transform_details(round_keys[0], b0)
+        a1 = g_info["after_rot11"] ^ b1
+        a0 = b0
+
+        if return_rounds:
+            rounds.append({
+                "round": 32,
+                "type": "G*",
+                "key": f"{round_keys[0]:08x}",
+                "in_a1": f"{b1:08x}",
+                "in_a0": f"{b0:08x}",
+                "a0_plus_k": f"{g_info['after_add_mod32']:08x}",
+                "after_t": f"{g_info['after_t']:08x}",
+                "after_rot11": f"{g_info['after_rot11']:08x}",
+                "out_a1": f"{a1:08x}",
+                "out_a0": f"{a0:08x}"
+            })
+
+        result = (a1 << 32) | a0
+
+        return {
+            "success": True,
+            "algorithm": "magma",
+            "mode": "decrypt",
+            "input_block": block_hex,
+            "key": key_hex,
+            "round_keys": [f"{k:08x}" for k in round_keys],
+            "rounds": rounds,
+            "result_block": f"{result:016x}"
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "algorithm": "magma",
+            "mode": "decrypt",
+            "error": str(e),
+            "input_block": block_hex,
+            "key": key_hex
+        }
 
 
-def test_gost_example():
-    """
-    Тестирует алгоритм на контрольном примере из ГОСТ Р 34.12-2015
-    Приложение А.2
-    """
-    print("=" * 80)
-    print("ТЕСТИРОВАНИЕ НА КОНТРОЛЬНОМ ПРИМЕРЕ ИЗ ГОСТ Р 34.12-2015 (А.2)")
-    print("=" * 80)
-    
-    # Ключ из примера A.2.3
-    K = "ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
-    
-    print(f"\nКлюч (256 бит):\n{K}")
-    
-    # Генерируем раундовые ключи
-    round_keys = generate_round_keys(K)
-    
-    # Проверяем раундовые ключи (A.2.3)
-    expected_keys = {
-        1: 0xffeeddcc, 9: 0xffeeddcc, 17: 0xffeeddcc, 25: 0xfcfdfeff,
-        2: 0xbbaa9988, 10: 0xbbaa9988, 18: 0xbbaa9988, 26: 0xf8f9fafb,
-        3: 0x77665544, 11: 0x77665544, 19: 0x77665544, 27: 0xf4f5f6f7,
-        4: 0x33221100, 12: 0x33221100, 20: 0x33221100, 28: 0xf0f1f2f3,
-        5: 0xf0f1f2f3, 13: 0xf0f1f2f3, 21: 0xf0f1f2f3, 29: 0x33221100,
-        6: 0xf4f5f6f7, 14: 0xf4f5f6f7, 22: 0xf4f5f6f7, 30: 0x77665544,
-        7: 0xf8f9fafb, 15: 0xf8f9fafb, 23: 0xf8f9fafb, 31: 0xbbaa9988,
-        8: 0xfcfdfeff, 16: 0xfcfdfeff, 24: 0xfcfdfeff, 32: 0xffeeddcc
+def run_magma(
+    mode: str,
+    block_hex: str,
+    key_hex: str,
+    return_rounds: bool = False
+) -> Dict[str, Any]:
+    if mode == "encrypt":
+        return magma_encrypt_block(block_hex, key_hex, return_rounds=return_rounds)
+    elif mode == "decrypt":
+        return magma_decrypt_block(block_hex, key_hex, return_rounds=return_rounds)
+    else:
+        return {
+            "success": False,
+            "algorithm": "magma",
+            "mode": mode,
+            "error": "mode должен быть 'encrypt' или 'decrypt'."
+        }
+
+
+def format_feistel_table(rounds: List[Dict[str, Any]]) -> str:
+    if not rounds:
+        return "Таблица раундов отсутствует."
+
+    lines = []
+    lines.append(
+        "Rnd | T  | Key      | InA1     | InA0     | A0+K     | S(A0+K)  | Rot11    | OutA1    | OutA0"
+    )
+    lines.append("-" * 110)
+
+    for r in rounds:
+        lines.append(
+            f"{r['round']:>3} | "
+            f"{r['type']:<2} | "
+            f"{r['key']} | "
+            f"{r['in_a1']} | "
+            f"{r['in_a0']} | "
+            f"{r['a0_plus_k']} | "
+            f"{r['after_t']} | "
+            f"{r['after_rot11']} | "
+            f"{r['out_a1']} | "
+            f"{r['out_a0']}"
+        )
+
+    return "\n".join(lines)
+
+
+def test_gost_example() -> Dict[str, Any]:
+    key = "ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    plaintext = "fedcba9876543210"
+    expected_cipher = "4ee901e5c2d8ca3d"
+
+    enc = magma_encrypt_block(plaintext, key, return_rounds=True)
+    if not enc["success"]:
+        return enc
+
+    dec = magma_decrypt_block(enc["result_block"], key, return_rounds=False)
+    if not dec["success"]:
+        return dec
+
+    return {
+        "success": True,
+        "algorithm": "magma",
+        "test_name": "ГОСТ Р 34.12-2015 A.2",
+        "key": key,
+        "plaintext": plaintext,
+        "expected_cipher": expected_cipher,
+        "actual_cipher": enc["result_block"],
+        "decrypted": dec["result_block"],
+        "test_passed": enc["result_block"] == expected_cipher and dec["result_block"] == plaintext,
+        "rounds": enc["rounds"],
+        "round_keys": enc["round_keys"]
     }
-    
-    print("\nПроверка раундовых ключей:")
-    all_correct = True
-    for i in sorted(expected_keys.keys()):
-        expected = expected_keys[i]
-        actual = round_keys[i-1]
-        status = "✓" if actual == expected else "✗"
-        print(f"  K{i:2d} = {actual:08x} (ожидается {expected:08x}) {status}")
-        if actual != expected:
-            all_correct = False
-    
-    if not all_correct:
-        print("\nОШИБКА: Раундовые ключи не совпадают!")
-        return False
-    
-    print("\nВсе раундовые ключи совпадают!")
-    
-    # Открытый текст из примера A.2.4
-    a = 0xfedcba9876543210
-    
-    print(f"\n{'-'*80}")
-    print("ШИФРОВАНИЕ:")
-    print(f"Открытый текст (64 бит):    {a:016x}")
-    
-    a1 = (a >> 32) & 0xFFFFFFFF
-    a0 = a & 0xFFFFFFFF
-    print(f"  (a1, a0) = ({a1:08x}, {a0:08x})")
-    
-    # Шифрование
-    b = magma_encrypt(a, round_keys)
-    
-    print(f"\nЗашифрованный текст:        {b:016x}")
-    print(f"Ожидается по ГОСТ:          4ee901e5c2d8ca3d")
-    
-    if b == 0x4ee901e5c2d8ca3d:
-        print("ШИФРОВАНИЕ УСПЕШНО!")
-    else:
-        print("ОШИБКА ШИФРОВАНИЯ!")
-        return False
-    
-    # Расшифрование
-    print(f"\n{'-'*80}")
-    print("РАСШИФРОВАНИЕ:")
-    print(f"Зашифрованный текст:        {b:016x}")
-    
-    d = magma_decrypt(b, round_keys)
-    
-    print(f"Расшифрованный текст:       {d:016x}")
-    print(f"Ожидается (исходный текст): {a:016x}")
-    
-    if d == a:
-        print("РАСШИФРОВАНИЕ УСПЕШНО!")
+
+
+def main():
+    print("=" * 80)
+    print("ШИФР МАГМА (ГОСТ Р 34.12-2015)")
+    print("СЕТЬ ФЕЙСТЕЛЯ / ТАБЛИЦА РАУНДОВ")
+    print("=" * 80)
+
+    while True:
         print("\n" + "=" * 80)
-        print("ВСЕ ТЕСТЫ ПРОЙДЕНЫ! АЛГОРИТМ РАБОТАЕТ КОРРЕКТНО!")
-        print("=" * 80)
-        return True
-    else:
-        print("ОШИБКА РАСШИФРОВАНИЯ!")
-        return False
+        print("Выберите действие:")
+        print("1 - Зашифровать 64-битный блок")
+        print("2 - Расшифровать 64-битный блок")
+        print("3 - Тест ГОСТ (A.2)")
+        print("0 - Выход")
+
+        choice = input("\nВаш выбор: ").strip()
+
+        if choice == '0':
+            print("\nДо свидания!")
+            break
+
+        elif choice == '1':
+            block = input("Введите открытый текст (16 HEX): ").strip()
+            key = input("Введите ключ (64 HEX): ").strip()
+            show_rounds = input("Показать таблицу Фейстеля? (y/n): ").strip().lower() in ('y', 'yes', 'д', 'да')
+
+            result = magma_encrypt_block(block, key, return_rounds=show_rounds)
+
+            if not result["success"]:
+                print(f"\nОшибка: {result['error']}")
+                continue
+
+            print("\n" + "=" * 80)
+            print("РЕЗУЛЬТАТ ШИФРОВАНИЯ")
+            print("=" * 80)
+            print(f"Открытый текст:      {result['input_block']}")
+            print(f"Ключ:                {result['key']}")
+            print(f"Зашифрованный текст: {result['result_block']}")
+            print("=" * 80)
+
+            if show_rounds:
+                print("\nТАБЛИЦА ФЕЙСТЕЛЯ:")
+                print(format_feistel_table(result["rounds"]))
+
+        elif choice == '2':
+            block = input("Введите шифртекст (16 HEX): ").strip()
+            key = input("Введите ключ (64 HEX): ").strip()
+            show_rounds = input("Показать таблицу Фейстеля? (y/n): ").strip().lower() in ('y', 'yes', 'д', 'да')
+
+            result = magma_decrypt_block(block, key, return_rounds=show_rounds)
+
+            if not result["success"]:
+                print(f"\nОшибка: {result['error']}")
+                continue
+
+            print("\n" + "=" * 80)
+            print("РЕЗУЛЬТАТ РАСШИФРОВАНИЯ")
+            print("=" * 80)
+            print(f"Шифртекст:           {result['input_block']}")
+            print(f"Ключ:                {result['key']}")
+            print(f"Расшифрованный текст:{result['result_block']}")
+            print("=" * 80)
+
+            if show_rounds:
+                print("\nТАБЛИЦА ФЕЙСТЕЛЯ:")
+                print(format_feistel_table(result["rounds"]))
+
+        elif choice == '3':
+            test = test_gost_example()
+
+            if not test["success"]:
+                print(f"\nОшибка теста: {test.get('error', 'неизвестная ошибка')}")
+                continue
+
+            print("\n" + "=" * 80)
+            print("ТЕСТ ГОСТ Р 34.12-2015 A.2")
+            print("=" * 80)
+            print(f"Ключ:              {test['key']}")
+            print(f"Открытый текст:    {test['plaintext']}")
+            print(f"Ожидаемый шифртекст: {test['expected_cipher']}")
+            print(f"Фактический шифртекст:{test['actual_cipher']}")
+            print(f"Расшифровка:       {test['decrypted']}")
+            print(f"Статус:            {'УСПЕХ' if test['test_passed'] else 'ОШИБКА'}")
+            print("=" * 80)
+
+        else:
+            print("\nНеверный выбор. Попробуйте снова.")
 
 
-# Главная программа
-print("=" * 80)
-print("Шифр МАГМА (ГОСТ Р 34.12-2015)")
-print("Шифрование 64-битных чисел")
-print("=" * 80)
-
-while True:
-    print("\n" + "=" * 80)
-    print("Выберите действие:")
-    print("1 - Зашифровать 64-битное число") # - Для МАГМА print("1 - Зашифровать 64-битное число")
-    print("2 - Расшифровать 64-битное число")
-    print("3 - Запустить тест на примере из ГОСТ (А.2)")
-    print("0 - Выход")
-    
-    choice = input("\nВаш выбор: ")
-    
-    if choice == '0':
-        print("\nДо свидания!")
-        break
-    
-    elif choice == '1':
-        print("\n" + "-" * 80)
-        print("ШИФРОВАНИЕ 64-БИТНОГО ЧИСЛА (МАГМА)")
-        print("-" * 80)
-        
-        # 1. Ввод открытого текста
-        plaintext = input_hex(
-            "Введите открытый текст (16 HEX символов): ",
-            16,
-            "Открытый текст"
-        )
-        
-        # 2. Ввод ключа (РАСКОММЕНТИРОВАНО И ИСПРАВЛЕНО)
-        key = input_hex(
-            "Введите ключ (64 HEX символа, 256 бит): ",
-            64,
-            "Ключ"
-        )
-        
-        # 3. Генерируем раундовые ключи
-        round_keys = generate_round_keys(key)
-        
-        # 4. Шифруем
-        plaintext_int = int(plaintext, 16)
-        ciphertext_int = magma_encrypt(plaintext_int, round_keys)
-        
-        print(f"\n{'='*80}")
-        print(f"Открытый текст:      {plaintext_int:016x}")
-        print(f"Ключ:                {key}")
-        print(f"Зашифрованный текст: {ciphertext_int:016x}")
-        print(f"{'='*80}")
-        
-    elif choice == '2':  
-        print("\n" + "-" * 80)
-        print("РАСШИФРОВАНИЕ 64-БИТНОГО ЧИСЛА")
-        print("-" * 80)
-        
-        # Ввод зашифрованного текста с проверкой
-        ciphertext = input_hex(
-            "Введите зашифрованный текст (16 HEX символов, 64 бита): ",
-            16,
-            "Зашифрованный текст"
-        )
-        
-        # Ввод ключа с проверкой
-        key = input_hex(
-            "Введите ключ (64 HEX символа, 256 бит): ",
-            64,
-            "Ключ"
-        )
-        
-        # Генерируем раундовые ключи
-        round_keys = generate_round_keys(key)
-        
-        # Расшифровываем
-        ciphertext_int = int(ciphertext, 16)
-        plaintext_int = magma_decrypt(ciphertext_int, round_keys)
-        
-        print(f"\n{'='*80}")
-        print(f"Зашифрованный текст:  {ciphertext_int:016x}")
-        print(f"Ключ:                 {key}")
-        print(f"Расшифрованный текст: {plaintext_int:016x}")
-        print(f"{'='*80}")
-    
-    elif choice == '3':
-        test_gost_example()
-        
-    else:
-
-        print("\nНеверный выбор. Попробуйте снова.")
+if __name__ == "__main__":
+    main()
